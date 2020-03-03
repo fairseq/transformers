@@ -24,10 +24,11 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 
-from .activations import gelu_new
 from .configuration_gpt2 import GPT2Config
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import Conv1D, PreTrainedModel, SequenceSummary, prune_conv1d_layer
+
+from fairseq.modules import LayerNorm as FairseqLayerNorm
 
 
 logger = logging.getLogger(__name__)
@@ -203,7 +204,7 @@ class MLP(nn.Module):
         nx = config.n_embd
         self.c_fc = Conv1D(n_state, nx)
         self.c_proj = Conv1D(nx, n_state)
-        self.act = gelu_new
+        self.act = nn.GELU()
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, x):
@@ -216,9 +217,9 @@ class Block(nn.Module):
     def __init__(self, n_ctx, config, scale=False):
         super().__init__()
         nx = config.n_embd
-        self.ln_1 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
+        self.ln_1 = FairseqLayerNorm(nx, eps=config.layer_norm_epsilon)
         self.attn = Attention(nx, n_ctx, config, scale)
-        self.ln_2 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
+        self.ln_2 = FairseqLayerNorm(nx, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * nx, config)
 
     def forward(self, x, layer_past=None, attention_mask=None, head_mask=None):
@@ -257,7 +258,7 @@ class GPT2PreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if isinstance(module, (nn.Linear, Conv1D)) and module.bias is not None:
                 module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
+        elif 'LayerNorm' in module.__class__.__name__:
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
@@ -336,7 +337,7 @@ class GPT2Model(GPT2PreTrainedModel):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([Block(config.n_ctx, config, scale=True) for _ in range(config.n_layer)])
-        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.ln_f = FairseqLayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
         self.init_weights()
 
